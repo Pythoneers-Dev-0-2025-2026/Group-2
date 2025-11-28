@@ -1,21 +1,27 @@
 import cv2
 cam = cv2.VideoCapture(0)
 
-if not cam.isOpened():
-    print("Error: Could not access camera")
-    exit()
-
-while True:
+def get_frame():
     ret, frame = cam.read()
-
     if not ret:
-        print("Failed to grab frame")
-        break
+        return None
+    return frame
+if __name__ == "__main__":
+    if not cam.isOpened():
+        print("Error: Could not access camera")
+        exit()
 
-    cv2.imshow("Camera Feed", frame)
+    while True:
+        frame = get_frame()
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        if frame is None:
+            print("Failed to grab frame")
+            break
 
-cam.release()
-cv2.destroyAllWindows()
+        cv2.imshow("Camera Feed", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cam.release()
+    cv2.destroyAllWindows()
