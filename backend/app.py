@@ -3,12 +3,17 @@ import time
 
 
 def lock():
-    # if the camera sends a message that there is someone in frame, this needs to be called
-    # send a message to the phone asking if you want to lock the computer, if input is yes use ctypes lockwindows 
-    pass
+    
+    ## camera will detect something, call lock -> 
+
+    ## lock will run and send a message to the users phone asking if they want to lock ->
+
+    ## y -> lock
+
+    ## n -> return
+
+    ctypes.WinDLL.user32.LockWorkStation() # this call locks the computer
 
 
 
-
-
-
+lock()
