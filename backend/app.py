@@ -1,5 +1,11 @@
 import ctypes #provides windll functions
 import time
+import socket
+
+hostname = socket.gethostname() # store laptop name is hostname
+ip = socket.gethostbyname(hostname)
+print(ip)
+
 
 
 def lock():
@@ -12,8 +18,14 @@ def lock():
 
     ## n -> return
 
-    ctypes.WinDLL.user32.LockWorkStation() # this call locks the computer
+    ctypes.windll.user32.LockWorkStation()
+    # this call locks the computer, and we want to lock user input as well
+
+
+def proctor():
+    pass
 
 
 
-lock()
+
+
