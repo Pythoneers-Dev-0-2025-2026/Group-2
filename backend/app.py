@@ -7,9 +7,7 @@ import os
 
 
 wtsapi32 = ctypes.windll.wtsapi32
-
 user32 = ctypes.windll.user32
-# print(user32)
 
 def lock():
     """
@@ -32,14 +30,13 @@ def check_lock_status():
         return True
     return False
     
-# def proctor():
 
 
+## testing
 if __name__ == "__main__": 
     
     threat_detected = False # will change to the response of the camera
 
-    ## testing
     lock()
     
     while True:

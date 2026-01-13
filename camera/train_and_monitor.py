@@ -6,6 +6,7 @@ import numpy as np
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+import json
 
 from camera import get_frame, release_camera
 from screenshots.screenshots import send_telegram_photo
@@ -232,12 +233,14 @@ def monitor():
             
             last_alert_time = now
             intruder_streak = 0  # reset after alert
+            return json.dumps(payload)
 
         cv2.imshow("Monitor - Owner vs Intruder", display)
 
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
+        
     release_camera()
     cv2.destroyAllWindows()
 
