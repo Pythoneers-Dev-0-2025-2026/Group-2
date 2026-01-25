@@ -1,3 +1,5 @@
 personal.env
 __pycache__/
 .venv/
+data/
+*.pyc
