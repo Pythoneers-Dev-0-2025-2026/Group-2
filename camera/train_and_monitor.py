@@ -8,6 +8,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from camera import get_frame, release_camera
+from screenshots.screenshots import send_telegram_photo
 
 
 #settings
@@ -224,6 +225,11 @@ def monitor():
             }
 
             send_json(payload)
+            
+            # Send Telegram notification with screenshot
+            caption = f"⚠️ INTRUDER DETECTED!\nConfidence: {confidence:.1f}\nTime: {iso_now()}"
+            send_telegram_photo(snapshot_path, caption)
+            
             last_alert_time = now
             intruder_streak = 0  # reset after alert
 
