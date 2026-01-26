@@ -1,16 +1,15 @@
-import os
 import json
+import os
 import time
+from datetime import datetime
+
 import cv2
 import numpy as np
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
-import json
 
-from camera import get_frame, release_camera
-from screenshots.screenshots import send_telegram_photo
-
+from .camera import get_frame, release_camera
+from .screenshots.screenshots import send_telegram_photo
 
 #settings
 OWNER_NAME = "owner"
