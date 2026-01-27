@@ -1,6 +1,7 @@
-personal.env
+*.env
 __pycache__/
 .venv/
+venv/
 data/enrolled/
 data/intruders/
 data/models/
