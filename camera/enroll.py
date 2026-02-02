@@ -8,7 +8,7 @@ from camera import get_frame, release_camera
 #settings
 OWNER_NAME = "owner"
 SAVE_DIR = os.path.join("data", "enrolled", OWNER_NAME)
-NUM_SAMPLES = 50
+NUM_SAMPLES = 200
 FACE_SIZE = (200, 200)
 MIN_FACE_AREA = 80 * 80 #dont capture small faces
 AUTO_CAPTURE_EVERY_SEC = 0.20

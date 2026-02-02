@@ -24,7 +24,7 @@ FACE_SIZE = (200, 200)
 MIN_FACE_AREA = 80 * 80
 
 #can trial and error this if needed
-INTRUDER_CONFIDENCE_THRESHOLD = 50.0
+INTRUDER_CONFIDENCE_THRESHOLD = 70.0
 
 #for potential spam
 ALERT_COOLDOWN_SEC = 10
