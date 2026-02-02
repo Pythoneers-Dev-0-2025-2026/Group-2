@@ -1,30 +1,54 @@
-import socket
-import app
+# backend/app/server.py
+import asyncio
 import json
-import os
-from dotenv import load_dotenv
-# this .env should have ip on there
-load_dotenv() 
+from websockets import serve
+from system import check_lock_status 
 
-threat_detected = False # for testing
-SERVERIP = os.getenv("SERVERIP")
-request = { 
-        # "threat_detection" : threat, needs to be realised from cv
-        "lock_status": app.check_lock_status(), 
-        "threat_detected" : threat_detected # this obviously will do nothing now
-        }
+connected_clients = set()
 
-HOST, PORT = SERVERIP, 12345
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+async def handle_client(websocket):
+    connected_clients.add(websocket)
+    print(f"Client connected: {websocket.remote_address}")
+
+    try:
+        while True:
+            try:
+                raw_msg = await websocket.recv()
+            except Exception as e:
+                print("Receive error:", e)
+                break
+
+            print("Received from client:", raw_msg)
+
+            try:
+                msg = json.loads(raw_msg)
+            except json.JSONDecodeError as e:
+                print("Invalid JSON:", raw_msg, e)
+                continue
+
+            response = {
+                "lock_status": check_lock_status(),
+                "echo": msg 
+            }
+
+            try:
+                await websocket.send(json.dumps(response))
+            except Exception as e:
+                print("Send error:", e)
+                break
+
+    finally:
+        connected_clients.remove(websocket)
+        print(f"Client disconnected: {websocket.remote_address}")
 
 
-data = request
-try:
-    sock.connect((HOST, PORT))
-    sock.sendall(json.dumps(data).encode("utf-8"))
+async def main():
+    host = "0.0.0.0" 
+    port = 12345
+    print(f"Starting WebSocket server on {host}:{port}")
+    async with serve(handle_client, host, port):
+        await asyncio.Future()
 
-    received = sock.recv(1024)
-    received = json.loads(received.decode("utf-8"))
 
-finally:
-    sock.close()
+if __name__ == "__main__":
+    asyncio.run(main())
