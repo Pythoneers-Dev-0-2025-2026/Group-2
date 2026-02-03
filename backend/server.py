@@ -1,54 +1,49 @@
-# backend/app/server.py
 import asyncio
 import json
+import threading
 from websockets import serve
-from system import check_lock_status 
 
-connected_clients = set()
+from backend.camera.train_and_monitor import monitor_stream, LATEST_STATE
+from backend.services import lock
+
+def start_camera():
+    monitor_stream()
 
 async def handle_client(websocket):
-    connected_clients.add(websocket)
-    print(f"Client connected: {websocket.remote_address}")
-
     try:
         while True:
+            # Receive commands (non-blocking)
             try:
-                raw_msg = await websocket.recv()
-            except Exception as e:
-                print("Receive error:", e)
-                break
-
-            print("Received from client:", raw_msg)
-
-            try:
+                raw_msg = await asyncio.wait_for(websocket.recv(), timeout=0.01)
                 msg = json.loads(raw_msg)
-            except json.JSONDecodeError as e:
-                print("Invalid JSON:", raw_msg, e)
-                continue
 
-            response = {
-                "lock_status": check_lock_status(),
-                "echo": msg 
-            }
+                if msg.get("type") == "COMMAND":
+                    action = msg.get("payload", {}).get("action")
+                    if action == "LOCK":
+                        lock()
 
-            try:
-                await websocket.send(json.dumps(response))
-            except Exception as e:
-                print("Send error:", e)
-                break
+            except asyncio.TimeoutError:
+                pass
 
-    finally:
-        connected_clients.remove(websocket)
-        print(f"Client disconnected: {websocket.remote_address}")
+            # Send full state (OLD behaviour)
+            await websocket.send(json.dumps({
+                "type": "STATE",
+                "payload": LATEST_STATE
+            }))
 
+            await asyncio.sleep(0.2)
+
+    except Exception:
+        pass  # silent like before
 
 async def main():
-    host = "0.0.0.0" 
-    port = 12345
-    print(f"Starting WebSocket server on {host}:{port}")
-    async with serve(handle_client, host, port):
-        await asyncio.Future()
+    threading.Thread(
+        target=start_camera,
+        daemon=True
+    ).start()
 
+    async with serve(handle_client, "0.0.0.0", 12345):
+        await asyncio.Future()
 
 if __name__ == "__main__":
     asyncio.run(main())
