@@ -4,10 +4,12 @@ import cv2
 
 from .camera import get_frame, release_camera
 
+# Data under backend/ (same as train_and_monitor: data/enrolled, data/models, data/intruders)
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DATA_DIR = os.path.join(_BACKEND_DIR, "data")
 
-#settings
 OWNER_NAME = "owner"
-SAVE_DIR = os.path.join("data", "enrolled", OWNER_NAME)
+SAVE_DIR = os.path.join(_DATA_DIR, "enrolled", OWNER_NAME)
 NUM_SAMPLES = 200
 FACE_SIZE = (200, 200)
 MIN_FACE_AREA = 80 * 80 #dont capture small faces
