@@ -2,7 +2,7 @@ import os
 import time
 import cv2
 
-from camera import get_frame, release_camera
+from .camera import get_frame, release_camera
 
 
 #settings

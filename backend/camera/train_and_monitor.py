@@ -1,264 +1,208 @@
-import json
 import os
-import time
-from datetime import datetime
-
 import cv2
+import time
+import threading
 import numpy as np
-import requests
-from dotenv import load_dotenv
+from collections import deque
 
-from .camera import get_frame, release_camera
-from .screenshots.screenshots import send_telegram_photo
+from .camera import get_frame, release_camera, encode_image
 
-#settings
-OWNER_NAME = "owner"
-ENROLL_DIR = os.path.join("data", "enrolled", OWNER_NAME)
-MODEL_DIR = os.path.join("data", "models")
-INTRUDER_DIR = os.path.join("data", "intruders")
+# ───────────── SHARED STATE ─────────────
 
-MODEL_PATH = os.path.join(MODEL_DIR, "lbph_model.yml")
-LABELS_PATH = os.path.join(MODEL_DIR, "labels.json")
+LATEST_STATE = {
+    "threat": False,
+    "fps": 0.0,
+    "image": None,
+    "faces": []
+}
+
+# ───────────── SETTINGS ─────────────
 
 FACE_SIZE = (200, 200)
 MIN_FACE_AREA = 80 * 80
 
-#can trial and error this if needed
+PROCESS_EVERY_N_FRAMES = 5
+DOWNSCALE_FACTOR = 0.5
+UPSCALE = int(1 / DOWNSCALE_FACTOR)
+
 INTRUDER_CONFIDENCE_THRESHOLD = 70.0
+DECISION_WINDOW = 7
+INTRUDER_VOTES_REQUIRED = 4
 
-#for potential spam
-ALERT_COOLDOWN_SEC = 10
+MODEL_PATH = "data/models/lbph_model.yml"
 
-#intruder in 3 frames before detecting
-INTRUDER_STREAK_REQUIRED = 3
+# ───────────── FACE SETUP ─────────────
 
+def get_face_cascade():
+    return cv2.CascadeClassifier(
+        os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+    )
 
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-#haar cascade
-def get_face_cascade() -> cv2.CascadeClassifier:
-    cascade_path = os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
-    cascade = cv2.CascadeClassifier(cascade_path)
-    if cascade.empty():
-        raise RuntimeError("Haar cascade failed")
-    return cascade
-
-
-def load_images_for_owner():
-    if not os.path.isdir(ENROLL_DIR):
-        raise FileNotFoundError(f"Enrollment folder not found: {ENROLL_DIR}")
-
-    paths = [
-        os.path.join(ENROLL_DIR, f)
-        for f in os.listdir(ENROLL_DIR)
-        if f.lower().endswith(".jpg") or f.lower().endswith(".png")
-    ]
-    paths.sort()
-
-    faces = []
-    labels = []
-
-    # 0 = owner
-    for p in paths:
-        img = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            continue
-        img = cv2.resize(img, FACE_SIZE)
-        faces.append(img)
-        labels.append(0)
-
-    if len(faces) < 10:
-        raise RuntimeError(f"Not enough enrollment images to train. Found {len(faces)} images in {ENROLL_DIR}")
-
-    return faces, labels
-
-
-def get_lbph_recognizer():
-    #LBPH in opencv-contrib-python
-    #this for if user doesnt have it installed
-    if not hasattr(cv2, "face"):
-        raise RuntimeError(
-            "cv2.face not found. You probably need opencv-contrib-python instead of opencv-python."
-        )
-    if not hasattr(cv2.face, "LBPHFaceRecognizer_create"):
-        raise RuntimeError(
-            "LBPHFaceRecognizer_create not found. Install opencv-contrib-python."
-        )
+def get_lbph():
     return cv2.face.LBPHFaceRecognizer_create()
 
-#RUN THIS FUNCTION TO TRAIN MODEL
-def train_model():
-    ensure_dir(MODEL_DIR)
-    faces, labels = load_images_for_owner()
+# ───────────── CAMERA THREAD ─────────────
 
-    recognizer = get_lbph_recognizer()
-   
-    labels_np = np.array(labels, dtype=np.int32)
-    recognizer.train(faces, labels_np)
-    recognizer.save(MODEL_PATH)
-    #save label map
-    label_map = {"0": OWNER_NAME}
-    with open(LABELS_PATH, "w", encoding="utf-8") as f:
-        json.dump(label_map, f, indent=2)
+class CameraThread:
+    def __init__(self):
+        self.frame = None
+        self.lock = threading.Lock()
+        self.stop = False
+        threading.Thread(target=self._run, daemon=True).start()
 
-    print(f"|TRAIN| - Trained model saved to: {MODEL_PATH}")
-    print(f"|TRAIN| - Labels saved to: {LABELS_PATH}")
+    def _run(self):
+        while not self.stop:
+            frame = get_frame()
+            if frame is not None:
+                with self.lock:
+                    self.frame = frame
 
-#----------------------------------------G SENDING JSON----------------------------------------
-def send_json(payload: dict):
-    #loads personal.env if present, prints JSON if fails
-    load_dotenv("personal.env")
+    def get(self):
+        with self.lock:
+            return None if self.frame is None else self.frame.copy()
 
-    backend_url = os.getenv("BACKEND_URL", "").strip()
-    api_key = os.getenv("API_KEY", "").strip()  # optional
+    def shutdown(self):
+        self.stop = True
+        release_camera()
 
-    if not backend_url:
-        print("[ALERT] BACKEND_URL not set. Printing JSON instead:")
-        print(json.dumps(payload, indent=2))
-        return
+# ───────────── VISION THREAD ─────────────
 
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+class VisionThread:
+    def __init__(self, camera):
+        self.camera = camera
+        self.stop = False
 
-    try:
-        r = requests.post(backend_url, json=payload, headers=headers, timeout=5)
-        print(f"[ALERT] Sent to backend. Status={r.status_code}")
-    except Exception as e:
-        print(f"[ALERT] Failed to send JSON: {e}")
-        print(json.dumps(payload, indent=2))
+        self.cascade = get_face_cascade()
+        self.recognizer = get_lbph()
+        self.recognizer.read(MODEL_PATH)
 
-#---------------------------------------------------------------------------------------------
+        self.vote_window = deque(maxlen=DECISION_WINDOW)
+        self.last_intruder_crop = None
+        self.prev_threat = False
 
+        print("[VISION] Vision thread started")
 
-def iso_now():
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+        threading.Thread(target=self._run, daemon=True).start()
 
-def save_intruder_snapshot(frame) -> str:
-    #saving intruder captures
-    ensure_dir(INTRUDER_DIR)
-    filename = os.path.join(INTRUDER_DIR, f"intruder_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-    cv2.imwrite(filename, frame)
-    return filename
+    def _run(self):
+        frame_count = 0
 
-#RUN THIS FUNCIOTN TO OPEN AND VIEW MONITOR
-def monitor():
-    ensure_dir(INTRUDER_DIR)
-
-    if not os.path.isfile(MODEL_PATH):
-        print("|MONITOR| - No model found. Training first...")
-        train_model()
-
-    recognizer = get_lbph_recognizer()
-    recognizer.read(MODEL_PATH)
-
-    face_cascade = get_face_cascade()
-
-    last_alert_time = 0.0
-    intruder_streak = 0
-
-    print("|MONITOR| - Running. Press 'q' to quit.")
-    print(f"|MONITOR| - Intruder threshold = confidence > {INTRUDER_CONFIDENCE_THRESHOLD} (lower = better match)")
-
-    while True:
-        frame = get_frame()
-        if frame is None:
-            print("|MONITOR| - Could not grab frame.")
-            break
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(60, 60)
-        )
-
-        display = frame.copy()
-
-        intruder_detected_this_frame = False
-        best_intruder_info = None
-
-        for (x, y, w, h) in faces:
-            if w * h < MIN_FACE_AREA:
+        while not self.stop:
+            frame = self.camera.get()
+            if frame is None:
+                time.sleep(0.001)
                 continue
 
-            face_roi = gray[y:y+h, x:x+w]
-            face_roi = cv2.resize(face_roi, FACE_SIZE)
+            frame_count += 1
+            if frame_count % PROCESS_EVERY_N_FRAMES != 0:
+                continue
 
-            label, confidence = recognizer.predict(face_roi)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            small = cv2.resize(gray, None, fx=DOWNSCALE_FACTOR, fy=DOWNSCALE_FACTOR)
 
-            #0 is owner and higher the confidence less likely to be owner
-            is_intruder = (label != 0) or (confidence > INTRUDER_CONFIDENCE_THRESHOLD)
+            detections = self.cascade.detectMultiScale(small, 1.1, 5)
 
-            #UI box and confidence status
-            color = (0, 0, 255) if is_intruder else (0, 255, 0)
-            cv2.rectangle(display, (x, y), (x + w, y + h), color, 2)
+            faces_out = []
+            intruder_seen = False
 
-            tag = f"{'INTRUDER' if is_intruder else 'OWNER'}  conf={confidence:.1f}"
-            cv2.putText(display, tag, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            for (x, y, w, h) in detections:
+                x, y, w, h = map(lambda v: int(v * UPSCALE), (x, y, w, h))
+                if w * h < MIN_FACE_AREA:
+                    continue
 
-            if is_intruder:
-                intruder_detected_this_frame = True
-                best_intruder_info = (x, y, w, h, float(confidence))
+                roi = gray[y:y+h, x:x+w]
+                roi = cv2.resize(roi, FACE_SIZE)
 
-        #intruder streak logic to reduce false positives
-        if intruder_detected_this_frame:
-            intruder_streak += 1
-        else:
-            intruder_streak = 0
+                label, conf = self.recognizer.predict(roi)
+                is_intruder = (label != 0) or (conf > INTRUDER_CONFIDENCE_THRESHOLD)
 
-        #alert only when streak reached and cooldown passed
-        now = time.time()
-        if best_intruder_info and intruder_streak >= INTRUDER_STREAK_REQUIRED and (now - last_alert_time) >= ALERT_COOLDOWN_SEC:
-            (x, y, w, h, confidence) = best_intruder_info
-            snapshot_path = save_intruder_snapshot(frame)
+                faces_out.append({
+                    "rect": (x, y, w, h),
+                    "intruder": is_intruder,
+                    "confidence": float(conf)
+                })
 
-            payload = {
-                "event": "intruder_detected",
-                "timestamp": iso_now(),
-                "confidence": confidence,
-                "bbox": [int(x), int(y), int(w), int(h)],
-                "snapshot_path": snapshot_path,
-            }
+                if is_intruder:
+                    intruder_seen = True
+                    self.last_intruder_crop = frame[y:y+h, x:x+w].copy()
 
-            send_json(payload)
-            
-            # Send Telegram notification with screenshot
-            caption = f"⚠️ INTRUDER DETECTED!\nConfidence: {confidence:.1f}\nTime: {iso_now()}"
-            send_telegram_photo(snapshot_path, caption)
-            
-            last_alert_time = now
-            intruder_streak = 0  # reset after alert
-            return json.dumps(payload)
+            self.vote_window.append(1 if intruder_seen else 0)
+            threat = sum(self.vote_window) >= INTRUDER_VOTES_REQUIRED
 
-        cv2.imshow("Monitor - Owner vs Intruder", display)
+            # Send image ONCE per intrusion
+            if threat and not self.prev_threat and self.last_intruder_crop is not None:
+                try:
+                    LATEST_STATE["image"] = encode_image(self.last_intruder_crop)
+                    print("[ALERT] Intruder detected (image captured)")
+                except Exception:
+                    pass
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+            self.prev_threat = threat
+            LATEST_STATE["faces"] = faces_out
+            LATEST_STATE["threat"] = threat
 
-        
-    release_camera()
-    cv2.destroyAllWindows()
+    def shutdown(self):
+        self.stop = True
 
+# ───────────── DRAWING ─────────────
 
-def main():
-    import sys
-    mode = "monitor"
-    if len(sys.argv) >= 2:
-        mode = sys.argv[1].strip().lower()
+def draw_faces(frame, faces):
+    for f in faces:
+        x, y, w, h = f["rect"]
+        intruder = f["intruder"]
+        conf = f["confidence"]
 
-    if mode == "train":
-        train_model()
-    elif mode == "monitor":
-        monitor()
-    else:
-        print("Usage:")
-        print("  python train_and_monitor.py train")
-        print("  python train_and_monitor.py monitor")
+        color = (0, 0, 255) if intruder else (0, 255, 0)
+        label = "INTRUDER" if intruder else "OWNER"
 
+        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+        cv2.putText(
+            frame,
+            f"{label} {conf:.1f}",
+            (x, max(0, y-8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2
+        )
 
-if __name__ == "__main__":
-    main()
+# ───────────── MAIN LOOP ─────────────
+
+def monitor_stream():
+    print("[MONITOR] Camera starting")
+    camera = CameraThread()
+    vision = VisionThread(camera)
+
+    last = time.time()
+    fps = 0.0
+
+    try:
+        while True:
+            frame = camera.get()
+            if frame is None:
+                continue
+
+            draw_faces(frame, LATEST_STATE["faces"])
+
+            now = time.time()
+            fps = 0.9 * fps + 0.1 * (1.0 / max(now - last, 1e-6))
+            last = now
+            LATEST_STATE["fps"] = fps
+
+            cv2.putText(
+                frame,
+                f"FPS: {fps:.1f}",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2
+            )
+
+            cv2.imshow("Monitor", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        vision.shutdown()
+        camera.shutdown()
+        cv2.destroyAllWindows()

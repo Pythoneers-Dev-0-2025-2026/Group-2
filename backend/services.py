@@ -1,10 +1,7 @@
 import ctypes #provides windll functions
 import subprocess
 import time
-import socket # will be used to send data between phone and laptop
 import json
-import os
-
 
 wtsapi32 = ctypes.windll.wtsapi32
 user32 = ctypes.windll.user32
@@ -14,7 +11,6 @@ def lock():
     Locks windows workstation, sets lock_status to True
     """
     user32.LockWorkStation()
-    check_lock_status()
     return None
 
 def check_lock_status():
@@ -30,7 +26,6 @@ def check_lock_status():
         return True
     return False
     
-
 
 ## testing
 if __name__ == "__main__": 
