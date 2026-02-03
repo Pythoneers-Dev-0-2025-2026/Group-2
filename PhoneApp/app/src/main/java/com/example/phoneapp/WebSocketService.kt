@@ -13,9 +13,8 @@ class WebSocketService : Service() {
     private lateinit var webSocket: WebSocket
     private val client = OkHttpClient()
 
-    private val handler = Handler(Looper.getMainLooper())
-    private val reconnectDelayMs = 3000L
     private var isConnecting = false
+    private var ipAddress: String? = null
 
     // ───────── Lifecycle ─────────
 
@@ -23,27 +22,38 @@ class WebSocketService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForeground(1, createNotification("Starting…"))
-        connectWebSocket()
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "LOCK_PC") {
             sendLockCommand()
+        } else {
+            ipAddress = intent?.getStringExtra("ipAddress")
+            connectWebSocket()
         }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::webSocket.isInitialized) {
+            webSocket.close(1000, "Service destroyed")
+        }
+    }
+
     // ───────── WebSocket ─────────
 
     private fun connectWebSocket() {
-        if (isConnecting) return
+        if (isConnecting || ipAddress == null) return
         isConnecting = true
+        broadcastStatus("Connecting to $ipAddress…")
+        updateNotification("Connecting to $ipAddress…")
 
         val request = Request.Builder()
-            .url("ws://172.20.10.2:12345")
+            .url("ws://$ipAddress:12345")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -62,18 +72,19 @@ class WebSocketService : Service() {
             @RequiresApi(Build.VERSION_CODES.O)
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 isConnecting = false
-                updateNotification("Disconnected — retrying…")
-                broadcastStatus("Disconnected — retrying…")
-                scheduleReconnect()
+                updateNotification("Connection Failed")
+                broadcastStatus("Connection Failed")
+                sendBroadcast(
+                    Intent("WS_CONNECTION_FAILURE").apply {
+                        setPackage(packageName)
+                    }
+                )
+                stopSelf()
             }
         })
     }
 
-    private fun scheduleReconnect() {
-        handler.postDelayed({ connectWebSocket() }, reconnectDelayMs)
-    }
-
-    // ───────── Message handling (OLD BEHAVIOUR) ─────────
+    // ───────── Message handling ─────────
 
     private fun handleMessage(message: String) {
         try {
@@ -82,7 +93,6 @@ class WebSocketService : Service() {
 
             val payload = json.getJSONObject("payload")
 
-            // status — just show *something* so UI moves on
             if (payload.getBoolean("threat")) {
                 broadcastStatus("⚠️ INTRUDER DETECTED")
                 updateNotification("⚠️ INTRUDER DETECTED")
@@ -90,14 +100,20 @@ class WebSocketService : Service() {
                 broadcastStatus("Connected")
             }
 
-            // image — spam display like before
             if (!payload.isNull("image")) {
                 val base64 = payload.getString("image")
                 showImage(base64)
+            } else {
+                 sendBroadcast(
+                    Intent("WS_IMAGE").apply {
+                        putExtra("hasImage", false)
+                        setPackage(packageName)
+                    }
+                )
             }
 
         } catch (_: Exception) {
-            // ignore malformed frames like before
+            // Ignore malformed frames
         }
     }
 

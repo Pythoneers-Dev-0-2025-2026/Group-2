@@ -11,6 +11,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -48,6 +49,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ───────── Connection failure receiver ─────────
+    private val connectionFailureReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            Toast.makeText(context, "Connection Failed. Please re-enter the IP Address.", Toast.LENGTH_LONG).show()
+            val ipEntryIntent = Intent(context, IpEntryActivity::class.java)
+            startActivity(ipEntryIntent)
+            finish()
+        }
+    }
+
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,7 +76,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Start WebSocket service
-        val serviceIntent = Intent(this, WebSocketService::class.java)
+        val ipAddress = intent.getStringExtra("ipAddress")
+        val serviceIntent = Intent(this, WebSocketService::class.java).apply {
+            putExtra("ipAddress", ipAddress)
+        }
         ContextCompat.startForegroundService(this, serviceIntent)
 
         // Register receivers
@@ -80,11 +94,18 @@ class MainActivity : AppCompatActivity() {
             IntentFilter("WS_IMAGE"),
             RECEIVER_NOT_EXPORTED
         )
+
+        registerReceiver(
+            connectionFailureReceiver,
+            IntentFilter("WS_CONNECTION_FAILURE"),
+            RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(statusReceiver)
         unregisterReceiver(imageReceiver)
+        unregisterReceiver(connectionFailureReceiver)
     }
 }
