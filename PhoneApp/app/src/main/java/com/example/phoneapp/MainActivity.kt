@@ -5,9 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
@@ -19,6 +19,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var statusText: TextView
     private lateinit var imageView: ImageView
+    private lateinit var lockButton: Button
 
     // ───────── Status receiver ─────────
     private val statusReceiver = object : BroadcastReceiver() {
@@ -34,15 +35,16 @@ class MainActivity : AppCompatActivity() {
             val hasImage = intent.getBooleanExtra("hasImage", false)
 
             if (!hasImage) {
-                imageView.setImageDrawable(null)
-                imageView.setBackgroundColor(Color.BLACK)
+                imageView.visibility = View.GONE
+                lockButton.visibility = View.GONE
                 return
             }
 
             val bytes = intent.getByteArrayExtra("imageBytes") ?: return
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            imageView.setBackgroundColor(Color.BLACK)
             imageView.setImageBitmap(bitmap)
+            imageView.visibility = View.VISIBLE
+            lockButton.visibility = View.VISIBLE
         }
     }
 
@@ -53,8 +55,8 @@ class MainActivity : AppCompatActivity() {
 
         statusText = findViewById(R.id.statusText)
         imageView = findViewById(R.id.imageView)
+        lockButton = findViewById(R.id.lockButton)
 
-        val lockButton = findViewById<Button>(R.id.lockButton)
         lockButton.setOnClickListener {
             val intent = Intent(this, WebSocketService::class.java).apply {
                 action = "LOCK_PC"

@@ -43,7 +43,7 @@ class WebSocketService : Service() {
         isConnecting = true
 
         val request = Request.Builder()
-            .url("ws://10.75.209.47:12345")
+            .url("ws://172.20.10.2:12345")
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
