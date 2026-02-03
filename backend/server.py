@@ -14,7 +14,7 @@ async def main():
     threading.Thread(target=start_camera, daemon=True).start()
 
     async with serve(
-        lambda ws, path: handle_client(ws),
+        handle_client,
         "0.0.0.0",
         12345,
     ):

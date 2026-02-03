@@ -7,6 +7,7 @@ import androidx.annotation.RequiresApi
 import okhttp3.*
 import org.json.JSONObject
 import android.util.Base64
+import android.widget.Toast
 
 class WebSocketService : Service() {
 
@@ -62,7 +63,14 @@ class WebSocketService : Service() {
             override fun onOpen(ws: WebSocket, response: Response) {
                 isConnecting = false
                 updateNotification("Connected")
-                broadcastStatus("Connected")
+                
+                // One-time message broadcast to the UI
+                broadcastStatus("You can now leave your laptop")
+                
+                // One-time Toast for immediate feedback
+                Handler(Looper.getMainLooper()).post {
+                    Toast.makeText(applicationContext, "You can now leave your laptop", Toast.LENGTH_LONG).show()
+                }
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
@@ -97,7 +105,9 @@ class WebSocketService : Service() {
                 broadcastStatus("⚠️ INTRUDER DETECTED")
                 updateNotification("⚠️ INTRUDER DETECTED")
             } else {
+                // Proceed as normal with updating text
                 broadcastStatus("Connected")
+                updateNotification("Connected")
             }
 
             if (!payload.isNull("image")) {
