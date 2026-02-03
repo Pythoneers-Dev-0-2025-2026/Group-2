@@ -1,4 +1,4 @@
-# Python Guardian
+# Group-2 LastMindesign
 
 Desktop security system that uses a webcam to distinguish the device owner from intruders. When an unknown face is detected, the system can lock the workstation (Windows), send alerts to a backend, and optionally notify via Telegram. An Android app can connect to the backend over WebSocket to view live state and send commands (e.g. lock).
 
@@ -70,6 +70,16 @@ Group-2-lastmindesign/
    ```bash
    pip install opencv-contrib-python
    ```
+
+4. Optional: create `backend/personal.env` (or `personal.env` in project root) for alerts:
+
+   ```env
+   BACKEND_URL=https://your-backend.com/alerts
+   API_KEY=your-optional-bearer-token
+   ```
+
+   If `BACKEND_URL` is not set, intruder payloads are printed to the console instead of POSTed.
+
 ---
 
 ## Usage
