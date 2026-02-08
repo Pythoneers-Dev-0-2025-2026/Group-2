@@ -1,4 +1,4 @@
-# Group-2 LastMindesign
+# WatchDog
 
 Desktop security system that uses a webcam to distinguish the device owner from intruders. When an unknown face is detected, the system can lock the workstation (Windows), send alerts to a backend, and optionally notify via Telegram. An Android app can connect to the backend over WebSocket to view live state and send commands (e.g. lock).
 
